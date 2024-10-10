@@ -1,15 +1,16 @@
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Arc, Mutex,
+    Arc,
 };
 
 use crate::PageId;
 
 const PAGE_SIZE: usize = 4096;
 
+#[derive(Debug)]
 pub struct Page {
     id: Option<PageId>,
-    data: Arc<Mutex<Vec<u8>>>,
+    data: Vec<u8>,
     pin_count: AtomicUsize,
     is_dirty: bool,
 }
@@ -17,10 +18,19 @@ pub struct Page {
 impl Page {
     pub fn new() -> Self {
         Page {
-            data: Arc::new(Mutex::new(vec![0; PAGE_SIZE])),
+            data: vec![0; PAGE_SIZE],
             pin_count: AtomicUsize::new(0),
             is_dirty: false,
             id: None,
+        }
+    }
+
+    pub fn new_with_id(id: PageId) -> Self {
+        Page {
+            data: vec![0; PAGE_SIZE],
+            pin_count: AtomicUsize::new(0),
+            is_dirty: false,
+            id: Some(id),
         }
     }
 
@@ -29,11 +39,15 @@ impl Page {
         self.pin_count.store(0, Ordering::SeqCst);
         self.is_dirty = false;
         // TODO: is it required to create new?
-        self.data = Arc::new(Mutex::new(vec![0; PAGE_SIZE]));
+        self.data = vec![0; PAGE_SIZE];
     }
 
-    pub fn data(&self) -> Arc<Mutex<Vec<u8>>> {
-        Arc::clone(&self.data)
+    pub fn get_data(&self) -> &Vec<u8> {
+        &self.data
+    }
+
+    pub fn set_data(&mut self, new_data: Vec<u8>) {
+        self.data = new_data;
     }
 
     pub fn pin(&self) {
@@ -54,5 +68,17 @@ impl Page {
 
     pub fn is_dirty(&self) -> bool {
         self.is_dirty
+    }
+
+    pub fn get_id(&self) -> Option<PageId> {
+        self.id
+    }
+
+    pub fn set_id(&mut self, id: PageId) {
+        self.id = Some(id);
+    }
+
+    fn to_arc_slice(self) -> Arc<[u8]> {
+        Arc::from(self.data.into_boxed_slice())
     }
 }

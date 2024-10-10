@@ -1,6 +1,6 @@
 use std::{thread, time::Duration};
 
-use crate::PageId;
+use crate::page::Page;
 
 pub struct DiskManager {}
 
@@ -9,11 +9,13 @@ impl DiskManager {
         Self {}
     }
 
-    pub fn read_page(&self, page_id: PageId, page_content: &mut [u8]) {
-        thread::sleep(Duration::from_millis(500));
+    pub fn read_page(&self, page: &mut Page) -> Vec<u8> {
+        thread::sleep(Duration::from_millis(300));
+
+        vec![0]
     }
 
-    pub fn write_page(&self, page_id: PageId, page_content: &[u8]) {
-        thread::sleep(Duration::from_millis(600));
+    pub fn write_page(&self, page: &mut Page) {
+        thread::sleep(Duration::from_millis(200));
     }
 }
