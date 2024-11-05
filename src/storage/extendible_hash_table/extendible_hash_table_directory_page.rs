@@ -1,8 +1,11 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLockReadGuard, RwLockWriteGuard},
+};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{page::Page, PageId};
+use crate::page::{Page, PageId};
 
 use super::error::ExtendibleHashTableError;
 
@@ -162,7 +165,7 @@ impl ExtendibleHTableDirectoryPage {
             let curr_ld = self.local_depths[curr_idx];
 
             assert!(
-                curr_ld <= self.global_depth as u32,
+                curr_ld <= self.global_depth,
                 "Local depth exceeds global depth"
             );
 
@@ -192,8 +195,15 @@ impl ExtendibleHTableDirectoryPage {
     }
 }
 
-impl From<&std::sync::MutexGuard<'_, Page>> for ExtendibleHTableDirectoryPage {
-    fn from(page: &std::sync::MutexGuard<'_, Page>) -> Self {
+impl From<&RwLockWriteGuard<'_, Page>> for ExtendibleHTableDirectoryPage {
+    fn from(page: &RwLockWriteGuard<'_, Page>) -> Self {
+        let data = page.get_data();
+        bincode::deserialize(data).unwrap()
+    }
+}
+
+impl From<&RwLockReadGuard<'_, Page>> for ExtendibleHTableDirectoryPage {
+    fn from(page: &RwLockReadGuard<'_, Page>) -> Self {
         let data = page.get_data();
         bincode::deserialize(data).unwrap()
     }

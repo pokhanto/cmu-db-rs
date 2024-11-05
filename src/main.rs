@@ -7,8 +7,6 @@ mod lru_k_replacer;
 mod page;
 mod storage;
 
-pub type PageId = usize;
-
 fn main() {
     let lru_k_replacer = LruKReplacer::new(5, 5);
     lru_k_replacer.evict();

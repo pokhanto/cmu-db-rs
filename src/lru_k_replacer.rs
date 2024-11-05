@@ -1,6 +1,5 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::usize;
 
 pub type FrameId = usize;
 pub type Timestamp = u128;
@@ -294,7 +293,7 @@ mod tests {
 
         replacer.set_evictable(first_frame_id, true);
         replacer.remove(first_frame_id);
-        
+
         let frame_id = replacer.evict();
 
         assert_eq!(frame_id, None);

@@ -1,6 +1,8 @@
+use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
+
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{page::Page, PageId};
+use crate::page::{Page, PageId};
 
 #[derive(Serialize, Deserialize, Debug)]
 #[repr(C)]
@@ -44,8 +46,15 @@ impl ExtendibleHTableHeaderPage {
     }
 }
 
-impl From<&std::sync::MutexGuard<'_, Page>> for ExtendibleHTableHeaderPage {
-    fn from(page: &std::sync::MutexGuard<'_, Page>) -> Self {
+impl From<&RwLockWriteGuard<'_, Page>> for ExtendibleHTableHeaderPage {
+    fn from(page: &RwLockWriteGuard<'_, Page>) -> Self {
+        let data = page.get_data();
+        bincode::deserialize(data).unwrap()
+    }
+}
+
+impl From<&RwLockReadGuard<'_, Page>> for ExtendibleHTableHeaderPage {
+    fn from(page: &RwLockReadGuard<'_, Page>) -> Self {
         let data = page.get_data();
         bincode::deserialize(data).unwrap()
     }

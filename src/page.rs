@@ -3,7 +3,7 @@ use std::sync::{
     Arc,
 };
 
-use crate::PageId;
+pub type PageId = usize;
 
 const PAGE_SIZE: usize = 4096;
 

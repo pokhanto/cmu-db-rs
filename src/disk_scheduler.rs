@@ -5,12 +5,15 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::Sender,
-        Arc, Mutex,
+        Arc, Mutex, RwLock,
     },
     thread,
 };
 
-use crate::{disk_manager::DiskManager, page::Page, PageId};
+use crate::{
+    disk_manager::DiskManager,
+    page::{Page, PageId},
+};
 
 #[derive(Debug)]
 struct DiskRequestQueue {
@@ -27,7 +30,7 @@ impl DiskRequestQueue {
     }
 
     pub fn push(&mut self, disk_request: DiskRequest) {
-        let page = disk_request.page.lock().unwrap();
+        let page = disk_request.page.write().unwrap();
         let page_id = page.get_id().unwrap();
         let queue = self.queues.entry(page_id).or_default();
         drop(page);
@@ -72,7 +75,7 @@ impl Worker {
                 let disk_request = pop_queue.start_processing();
                 drop(pop_queue);
                 if let Some(disk_request) = disk_request {
-                    let mut page = disk_request.page.lock().unwrap();
+                    let mut page = disk_request.page.write().unwrap();
                     let page_id = page.get_id().unwrap();
                     println!(
                         "start processing page {} with write {:?}",
@@ -144,7 +147,7 @@ impl Drop for WorkerPool {
 #[derive(Debug)]
 struct DiskRequest {
     is_write: bool,
-    page: Arc<Mutex<Page>>,
+    page: Arc<RwLock<Page>>,
     callback_sender: Sender<Result<()>>,
 }
 
@@ -160,7 +163,7 @@ impl DiskScheduler {
         Self { pool }
     }
 
-    pub fn schedule_read(&self, page: Arc<Mutex<Page>>, callback_sender: Sender<Result<()>>) {
+    pub fn schedule_read(&self, page: Arc<RwLock<Page>>, callback_sender: Sender<Result<()>>) {
         self.pool.execute(DiskRequest {
             is_write: false,
             page,
@@ -168,7 +171,7 @@ impl DiskScheduler {
         });
     }
 
-    pub fn schedule_write(&self, page: Arc<Mutex<Page>>, callback_sender: Sender<Result<()>>) {
+    pub fn schedule_write(&self, page: Arc<RwLock<Page>>, callback_sender: Sender<Result<()>>) {
         self.pool.execute(DiskRequest {
             is_write: true,
             page,
@@ -212,9 +215,9 @@ mod tests {
                 let (result_sender, result_receiver) = mpsc::channel::<Result<()>>();
 
                 if is_write {
-                    scheduler.schedule_write(Arc::new(Mutex::new(page)), result_sender);
+                    scheduler.schedule_write(Arc::new(RwLock::new(page)), result_sender);
                 } else {
-                    scheduler.schedule_read(Arc::new(Mutex::new(page)), result_sender);
+                    scheduler.schedule_read(Arc::new(RwLock::new(page)), result_sender);
                 }
                 drop(test_data);
 

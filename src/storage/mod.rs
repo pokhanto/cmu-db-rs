@@ -1,1 +1,1 @@
-mod extendible_hash_table;
+pub mod extendible_hash_table;

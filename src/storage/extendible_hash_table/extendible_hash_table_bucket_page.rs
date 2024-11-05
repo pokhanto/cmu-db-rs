@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fmt::Debug, hash::Hash};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    hash::Hash,
+    sync::{Arc, RwLockReadGuard, RwLockWriteGuard},
+};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -74,12 +79,23 @@ where
     }
 }
 
-impl<K, V> From<&std::sync::MutexGuard<'_, Page>> for ExtendibleHTableBucketPage<K, V>
+impl<K, V> From<&RwLockWriteGuard<'_, Page>> for ExtendibleHTableBucketPage<K, V>
 where
     K: Hash + Eq + Clone + Debug + Serialize + DeserializeOwned,
     V: Clone + Debug + Serialize + DeserializeOwned,
 {
-    fn from(page: &std::sync::MutexGuard<'_, Page>) -> Self {
+    fn from(page: &RwLockWriteGuard<'_, Page>) -> Self {
+        let data = page.get_data();
+        bincode::deserialize(data).unwrap()
+    }
+}
+
+impl<K, V> From<&RwLockReadGuard<'_, Page>> for ExtendibleHTableBucketPage<K, V>
+where
+    K: Hash + Eq + Clone + Debug + Serialize + DeserializeOwned,
+    V: Clone + Debug + Serialize + DeserializeOwned,
+{
+    fn from(page: &RwLockReadGuard<'_, Page>) -> Self {
         let data = page.get_data();
         bincode::deserialize(data).unwrap()
     }
