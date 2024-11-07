@@ -1,9 +1,7 @@
 use anyhow::{bail, Context, Result};
 use dashmap::DashMap;
-use std::{
-    collections::HashMap,
-    sync::{mpsc, Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
-};
+use parking_lot::{RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{mpsc, Arc, Mutex};
 
 use crate::{
     disk_manager::DiskManager,
@@ -12,17 +10,12 @@ use crate::{
     page::{Page, PageId},
 };
 
-/*
-    TODO:
-    1. Fetch page should return guard.
-*/
-
 #[derive(Debug)]
 pub struct BufferPoolManager {
     free_list: Arc<Mutex<Vec<FrameId>>>,
-    pages: Vec<RwLock<Page>>,
+    pages: Vec<Page>,
     replacer: Arc<Mutex<LruKReplacer>>,
-    disk_scheduler: DiskScheduler,
+    disk_scheduler: Arc<DiskScheduler>,
     pages_map: DashMap<PageId, FrameId>,
     // TODO: should be atomic
     next_page_id: Arc<Mutex<PageId>>,
@@ -33,25 +26,25 @@ impl BufferPoolManager {
         let replacer = LruKReplacer::new(pool_size, replacer_k);
         let disk_scheduler = DiskScheduler::new(disk_manager);
         let pages_map: DashMap<PageId, FrameId> = DashMap::default();
-        let mut pages: Vec<RwLock<Page>> = Vec::with_capacity(pool_size);
+        let mut pages: Vec<Page> = Vec::with_capacity(pool_size);
         let mut free_list: Vec<FrameId> = Vec::with_capacity(pool_size);
 
         for i in 0..pool_size {
             free_list.push(i);
-            pages.push(RwLock::new(Page::new()));
+            pages.push(Page::new());
         }
 
         Self {
             pages,
             free_list: Arc::new(Mutex::new(free_list)),
             replacer: Arc::new(Mutex::new(replacer)),
-            disk_scheduler,
+            disk_scheduler: Arc::new(disk_scheduler),
             pages_map,
             next_page_id: Arc::new(Mutex::new(0)),
         }
     }
 
-    pub fn new_page(&self) -> Option<RwLockWriteGuard<'_, Page>> {
+    pub fn new_page(&self) -> Option<(PageId, RwLockWriteGuard<'_, Vec<u8>>)> {
         let replacer = self.replacer.lock().unwrap();
         let mut free_list = self.free_list.lock().unwrap();
         let frame_id = free_list.pop().or_else(|| replacer.evict());
@@ -61,33 +54,30 @@ impl BufferPoolManager {
         frame_id.map(|frame_id| {
             let page_id = self.allocate_page();
             let page = self.pages.get(frame_id).unwrap();
-            let mut guard = page.write().unwrap();
 
-            if guard.is_dirty() {
+            if page.is_dirty() {
                 let (sender, receiver) = mpsc::channel::<Result<()>>();
-                //self.disk_scheduler
-                //    .schedule_write(Arc::clone(&page), sender);
+                //self.disk_scheduler.schedule_write(&guard, sender);
                 let _ = receiver.recv().unwrap();
             }
-            guard.reset();
-            guard.set_id(page_id);
+            page.reset();
+            page.set_id(page_id);
 
             self.pages_map.insert(page_id, frame_id);
             let mut replacer = self.replacer.lock().unwrap();
             replacer.record_access(frame_id, AccessType::Unknown);
             replacer.set_evictable(frame_id, false);
 
-            guard
+            (page.get_id().unwrap(), page.get_data_write())
         })
     }
 
-    pub fn fetch_page_read(&self, page_id: PageId) -> Option<RwLockReadGuard<'_, Page>> {
+    pub fn fetch_page_read(&self, page_id: PageId) -> Option<RwLockReadGuard<'_, Vec<u8>>> {
         let frame_id = self.pages_map.get(&page_id);
         if let Some(frame_id) = frame_id {
             let page = self.pages.get(*frame_id).unwrap();
-            let guard = page.read().unwrap();
 
-            return Some(guard);
+            return Some(page.get_data_read());
         }
 
         let replacer = self.replacer.lock().unwrap();
@@ -97,58 +87,15 @@ impl BufferPoolManager {
         drop(replacer);
         frame_id.map(|frame_id| {
             let page = self.pages.get(frame_id).unwrap();
-            let mut guard = page.write().unwrap();
 
-            if guard.is_dirty() {
+            if page.is_dirty() {
                 let (sender, receiver) = mpsc::channel::<Result<()>>();
                 //self.disk_scheduler
                 //    .schedule_write(Arc::clone(&page_arc), sender);
                 let _ = receiver.recv().unwrap();
             }
-            guard.reset();
-            guard.set_id(page_id);
-            let (sender, receiver) = mpsc::channel::<Result<()>>();
-            //self.disk_scheduler
-            //    .schedule_read(Arc::clone(&page_arc), sender);
-            let _ = receiver.recv().unwrap();
-
-            self.pages_map.insert(page_id, frame_id);
-            let mut replacer = self.replacer.lock().unwrap();
-            replacer.set_evictable(frame_id, false);
-            replacer.record_access(frame_id, AccessType::Unknown);
-            drop(guard);
-
-            let guard = page.read().unwrap();
-            guard
-        })
-    }
-
-    pub fn fetch_page_write(&self, page_id: PageId) -> Option<RwLockWriteGuard<'_, Page>> {
-        let frame_id = self.pages_map.get(&page_id);
-        if let Some(frame_id) = frame_id {
-            let page = self.pages.get(*frame_id).unwrap();
-            let guard = page.write().unwrap();
-
-            return Some(guard);
-        }
-
-        let replacer = self.replacer.lock().unwrap();
-        let mut free_list = self.free_list.lock().unwrap();
-        let frame_id = free_list.pop().or_else(|| replacer.evict());
-        drop(replacer);
-        drop(free_list);
-        frame_id.map(|frame_id| {
-            let page = self.pages.get(frame_id).unwrap();
-            let mut guard = page.write().unwrap();
-
-            if guard.is_dirty() {
-                let (sender, receiver) = mpsc::channel::<Result<()>>();
-                //self.disk_scheduler
-                //    .schedule_write(Arc::clone(&page_arc), sender);
-                let _ = receiver.recv().unwrap();
-            }
-            guard.reset();
-            guard.set_id(page_id);
+            page.reset();
+            page.set_id(page_id);
             let (sender, receiver) = mpsc::channel::<Result<()>>();
             //self.disk_scheduler
             //    .schedule_read(Arc::clone(&page_arc), sender);
@@ -159,7 +106,45 @@ impl BufferPoolManager {
             replacer.set_evictable(frame_id, false);
             replacer.record_access(frame_id, AccessType::Unknown);
 
-            guard
+            page.get_data_read()
+        })
+    }
+
+    pub fn fetch_page_write(&self, page_id: PageId) -> Option<RwLockWriteGuard<'_, Vec<u8>>> {
+        let frame_id = self.pages_map.get(&page_id);
+        if let Some(frame_id) = frame_id {
+            let page = self.pages.get(*frame_id).unwrap();
+
+            return Some(page.get_data_write());
+        }
+
+        let replacer = self.replacer.lock().unwrap();
+        let mut free_list = self.free_list.lock().unwrap();
+        let frame_id = free_list.pop().or_else(|| replacer.evict());
+        drop(replacer);
+        drop(free_list);
+        frame_id.map(|frame_id| {
+            let page = self.pages.get(frame_id).unwrap();
+
+            if page.is_dirty() {
+                let (sender, receiver) = mpsc::channel::<Result<()>>();
+                //self.disk_scheduler
+                //    .schedule_write(Arc::clone(&page_arc), sender);
+                let _ = receiver.recv().unwrap();
+            }
+            page.reset();
+            page.set_id(page_id);
+            let (sender, receiver) = mpsc::channel::<Result<()>>();
+            //self.disk_scheduler
+            //    .schedule_read(Arc::clone(&page_arc), sender);
+            let _ = receiver.recv().unwrap();
+
+            self.pages_map.insert(page_id, frame_id);
+            let mut replacer = self.replacer.lock().unwrap();
+            replacer.set_evictable(frame_id, false);
+            replacer.record_access(frame_id, AccessType::Unknown);
+
+            page.get_data_write()
         })
     }
 
@@ -172,7 +157,6 @@ impl BufferPoolManager {
             .pages
             .get(*frame_id)
             .with_context(|| format!("Page {} is not in buffer pool.", page_id))?;
-        let mut frame = frame.write().unwrap();
 
         frame.unpin();
         frame.set_dirty(is_dirty);
@@ -190,11 +174,10 @@ impl BufferPoolManager {
             .pages_map
             .get(&page_id)
             .with_context(|| format!("Page {} is not in buffer pool.", page_id))?;
-        let frame_arc = self
+        let frame = self
             .pages
             .get(*frame_id)
             .with_context(|| format!("Page {} is not in buffer pool.", page_id))?;
-        let mut frame = frame_arc.write().unwrap();
 
         let (sender, receiver) = mpsc::channel::<Result<()>>();
         //self.disk_scheduler
@@ -222,7 +205,6 @@ impl BufferPoolManager {
             .pages
             .get(frame_id)
             .with_context(|| format!("Page {} is not in buffer pool.", page_id))?;
-        let mut frame = frame.write().unwrap();
 
         if frame.is_pinned() {
             bail!("Page {} is pinned and cannot be deleted.", page_id);

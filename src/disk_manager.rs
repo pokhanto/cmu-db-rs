@@ -9,13 +9,13 @@ impl DiskManager {
         Self {}
     }
 
-    pub fn read_page(&self, page: &mut Page) -> Vec<u8> {
+    pub fn read_page(&self, page: &Vec<u8>) -> Vec<u8> {
         thread::sleep(Duration::from_millis(300));
 
         vec![0]
     }
 
-    pub fn write_page(&self, page: &mut Page) {
+    pub fn write_page(&self, page: &Vec<u8>) {
         thread::sleep(Duration::from_millis(200));
     }
 }

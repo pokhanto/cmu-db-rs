@@ -1,8 +1,6 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLockReadGuard, RwLockWriteGuard},
-};
+use std::collections::HashMap;
 
+use parking_lot::{RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
 use crate::page::{Page, PageId};
@@ -195,16 +193,14 @@ impl ExtendibleHTableDirectoryPage {
     }
 }
 
-impl From<&RwLockWriteGuard<'_, Page>> for ExtendibleHTableDirectoryPage {
-    fn from(page: &RwLockWriteGuard<'_, Page>) -> Self {
-        let data = page.get_data();
+impl From<&RwLockWriteGuard<'_, Vec<u8>>> for ExtendibleHTableDirectoryPage {
+    fn from(data: &RwLockWriteGuard<'_, Vec<u8>>) -> Self {
         bincode::deserialize(data).unwrap()
     }
 }
 
-impl From<&RwLockReadGuard<'_, Page>> for ExtendibleHTableDirectoryPage {
-    fn from(page: &RwLockReadGuard<'_, Page>) -> Self {
-        let data = page.get_data();
+impl From<&RwLockReadGuard<'_, Vec<u8>>> for ExtendibleHTableDirectoryPage {
+    fn from(data: &RwLockReadGuard<'_, Vec<u8>>) -> Self {
         bincode::deserialize(data).unwrap()
     }
 }

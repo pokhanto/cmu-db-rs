@@ -4,7 +4,7 @@ use cmu_db_rs::{BufferPoolManager, DiskManager, ExtendibleHashTable, ThreadPool}
 use criterion::{criterion_group, criterion_main, Criterion};
 use tempfile::TempDir;
 
-const ENTRIES_NUMBER: u32 = 100;
+const ENTRIES_NUMBER: u32 = 50;
 const THREADS_NUMBER: u32 = 10;
 const BUFFER_POOL_SIZE: usize = 1000;
 const REPLACER_K: usize = 4;

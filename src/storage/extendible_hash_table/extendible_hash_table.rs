@@ -2,10 +2,9 @@ use super::error::ExtendibleHashTableError;
 use super::extendible_hash_table_bucket_page::ExtendibleHTableBucketPage;
 use super::extendible_hash_table_directory_page::ExtendibleHTableDirectoryPage;
 use super::extendible_hash_table_header_page::ExtendibleHTableHeaderPage;
-use crate::page::Page;
 use crate::{buffer_pool_manager::BufferPoolManager, page::PageId};
+use parking_lot::RwLockWriteGuard;
 use serde::{de::DeserializeOwned, Serialize};
-use std::sync::{MutexGuard, RwLockReadGuard, RwLockWriteGuard};
 use std::{
     fmt::Debug,
     hash::{DefaultHasher, Hash, Hasher},
@@ -55,10 +54,10 @@ where
 
         // TODO: what if BPM is not able to create new page
         let buf = Arc::clone(&buffer_pool_manager);
-        let mut header_page = buf.new_page().unwrap();
+        let (page_id, mut header_page) = buf.new_page().unwrap();
         let header = ExtendibleHTableHeaderPage::new(header_max_size);
         let header_data = header.to_bytes();
-        header_page.set_data(header_data);
+        *header_page = header_data;
 
         Self {
             name,
@@ -66,7 +65,7 @@ where
             bucket_max_size,
             // TODO: for now we assume that BPM will return page with initialized PageId
             // consider have Frame and Page entities, where Page always have PageId
-            header_page_id: header_page.get_id().unwrap(),
+            header_page_id: page_id,
             buffer_pool_manager,
             phantom_key: PhantomData,
             phantom_value: PhantomData,
@@ -97,13 +96,13 @@ where
                     )
                 }
                 None => {
-                    let new_page = self.buffer_pool_manager.new_page().unwrap();
-                    let directory_page_id = new_page.get_id().unwrap();
+                    let (page_id, new_page) = self.buffer_pool_manager.new_page().unwrap();
+                    let directory_page_id = page_id;
                     //let header_page = self.fetch_page(self.header_page_id).unwrap();
                     //let mut header_page = header_page.lock().unwrap();
                     //let mut header = ExtendibleHTableHeaderPage::from(&header_page);
                     header.set_directory_page_id(directory_index, directory_page_id);
-                    header_page.set_data(header.to_bytes());
+                    *header_page = header.to_bytes();
                     //drop(header_page);
 
                     (
@@ -124,7 +123,7 @@ where
         key: K,
         value: V,
         directory: &mut ExtendibleHTableDirectoryPage,
-        directory_page: &mut RwLockWriteGuard<'_, Page>,
+        directory_page: &mut RwLockWriteGuard<'_, Vec<u8>>,
     ) -> Result<(), ExtendibleHashTableError> {
         let insertion_key_hash = hash_string(key.to_string());
         let bucket_index = directory.hash_to_bucket_index(insertion_key_hash);
@@ -134,17 +133,15 @@ where
                     .buffer_pool_manager
                     .fetch_page_write(*bucket_page_id)
                     .unwrap();
-                let data = bucket_page.get_data();
 
                 (
-                    ExtendibleHTableBucketPage::from_bytes(data.as_slice()),
+                    ExtendibleHTableBucketPage::from_bytes(&bucket_page),
                     bucket_page,
                 )
             }
             None => {
-                let new_page = self.buffer_pool_manager.new_page().unwrap();
-
-                let bucket_page_id = new_page.get_id().unwrap();
+                let (page_id, new_page) = self.buffer_pool_manager.new_page().unwrap();
+                let bucket_page_id = page_id;
                 directory.set_bucket_page_id(bucket_index, bucket_page_id);
 
                 (
@@ -157,8 +154,8 @@ where
         if !bucket.is_full() {
             bucket.insert(key, value);
 
-            bucket_page.set_data(bucket.to_bytes());
-            directory_page.set_data(directory.to_bytes());
+            *bucket_page = bucket.to_bytes();
+            **directory_page = directory.to_bytes();
 
             Ok(())
         } else {
@@ -167,9 +164,9 @@ where
             let should_double_size = local_depth == global_depth;
 
             let new_bucket = ExtendibleHTableBucketPage::<K, V>::new(self.bucket_max_size);
-            let mut new_page = self.buffer_pool_manager.new_page().unwrap();
-            new_page.set_data(new_bucket.to_bytes());
-            let new_page_id = new_page.get_id().unwrap();
+            let (page_id, mut new_page) = self.buffer_pool_manager.new_page().unwrap();
+            *new_page = new_bucket.to_bytes();
+            let new_page_id = page_id;
             drop(new_page);
 
             let bucket_next_local_depth = directory.get_local_depth(bucket_index).unwrap() + 1;
@@ -198,9 +195,8 @@ where
             let mut all_entries = bucket.get_entries();
 
             // write data to pages
-            directory_page.set_data(directory.to_bytes());
-
-            bucket_page.set_data(bucket.to_bytes());
+            **directory_page = directory.to_bytes();
+            *bucket_page = bucket.to_bytes();
             drop(bucket_page);
 
             all_entries.push((key, value));
